@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Mobile HTML Maker</title>
+<style>
+body{font-family:sans-serif;background:#111;color:#fff;margin:0;padding:20px}
+h1{font-size:24px}
+h2{font-size:16px;margin:18px 0 6px}
+button,input{font-size:18px;margin:7px 0;padding:12px;border-radius:10px;border:none}
+button{width:100%;background:#2196F3;color:#fff}
+button:disabled{background:#555;color:#999}
+input[type=file]{background:#222;color:#fff}
+input[type=range]{width:100%;padding:0}
+.box{background:#222;padding:15px;border-radius:14px;margin-top:15px}
+small{color:#bbb}
+label{display:block;font-size:14px;color:#ccc;margin-top:10px}
+
+#editor{position:relative;width:100%;aspect-ratio:9/16;background:#000;
+        border:2px solid #444;border-radius:10px;overflow:hidden;touch-action:none}
+.eb{position:absolute;border-radius:12px;border:2px solid #fff;
+    background:rgba(33,150,243,.55);color:#fff;font:bold 20px sans-serif;
+    display:flex;align-items:center;justify-content:center;
+    user-select:none;touch-action:none}
+
+.row{display:flex;justify-content:space-between;align-items:center;background:#333;
+     padding:8px;border-radius:8px;margin:4px 0}
+.row button{width:auto;padding:6px 10px;margin:0 0 0 4px;background:#444}
+</style>
+</head>
+<body>
+<h1>📱 Mobile HTML Maker</h1>
+
+<div class="box">
+  <p>HTMLゲームをスマホ操作対応HTMLに変換します。大きいファイル(数十MB)でも動きます。</p>
+  <input id="file" type="file" accept=".html,.htm">
+  <button onclick="makeMobile()">🎮 Mobile HTMLを生成</button>
+  <button onclick="downloadResult()" id="save" disabled>💾 生成したHTMLを保存</button>
+  <p id="status"><small>HTMLファイルを選択してください。プレイヤーは生成後のゲーム内(右上の⚙)でも配置を自由に動かせます。</small></p>
+</div>
+
+<div class="box">
+  <h2>見た目の設定</h2>
+  <label>ボタンの大きさ: <span id="sizeVal">50</span></label>
+  <input type="range" id="sizeRange" min="1" max="100" value="50" oninput="onStyleChange()">
+  <label>ボタンの透明度: <span id="opVal">50</span></label>
+  <input type="range" id="opRange" min="1" max="100" value="50" oninput="onStyleChange()">
+</div>
+
+<div class="box">
+  <h2>初期配置(ドラッグで動かせます)</h2>
+  <div id="editor"></div>
+  <button onclick="addBtn()">➕ ボタン追加</button>
+  <div id="btnList"></div>
+</div>
+
+<script>
+let resultBlob = null;
+
+let buttons = [
+  {label:"↑", key:"ArrowUp",    code:"ArrowUp",    keyCode:38, x:15, y:78},
+  {label:"↓", key:"ArrowDown",  code:"ArrowDown",  keyCode:40, x:15, y:92},
+  {label:"←", key:"ArrowLeft",  code:"ArrowLeft",  keyCode:37, x:8,  y:85},
+  {label:"→", key:"ArrowRight", code:"ArrowRight", keyCode:39, x:22, y:85},
+  {label:"Z", key:"z", code:"KeyZ", keyCode:90, x:85, y:80},
+  {label:"X", key:"x", code:"KeyX", keyCode:88, x:78, y:88},
+  {label:"C", key:"c", code:"KeyC", keyCode:67, x:92, y:88}
+];
+
+// 1〜100 の見た目設定を実際の px / 不透明度に変換
+function sizePx(){
+  const v = +document.getElementById("sizeRange").value;
+  return 30 + (v/100)*70; // 30px〜100px
+}
+function opacityVal(){
+  const v = +document.getElementById("opRange").value;
+  return Math.max(0.03, v/100); // 0.03〜1.0
+}
+
+function onStyleChange(){
+  document.getElementById("sizeVal").textContent = document.getElementById("sizeRange").value;
+  document.getElementById("opVal").textContent = document.getElementById("opRange").value;
+  renderEditor();
+}
+
+function renderAll(){
+  renderEditor();
+  renderList();
+}
+
+function renderEditor(){
+  const editor = document.getElementById("editor");
+  editor.innerHTML = "";
+  const size = sizePx();
+  const op = opacityVal();
+  buttons.forEach((b,i) => {
+    const el = document.createElement("div");
+    el.className = "eb";
+    el.textContent = b.label;
+    el.style.width = size + "px";
+    el.style.height = size + "px";
+    el.style.marginLeft = (-size/2) + "px";
+    el.style.marginTop = (-size/2) + "px";
+    el.style.background = `rgba(33,150,243,${op})`;
+    el.style.left = b.x + "%";
+    el.style.top = b.y + "%";
+    el.addEventListener("pointerdown", e => startDrag(e,i,el));
+    editor.appendChild(el);
+  });
+}
+
+function startDrag(e, i, el){
+  e.preventDefault();
+  const editor = document.getElementById("editor");
+  const rect = editor.getBoundingClientRect();
+  el.setPointerCapture(e.pointerId);
+
+  function move(ev){
+    let x = (ev.clientX - rect.left) / rect.width * 100;
+    let y = (ev.clientY - rect.top) / rect.height * 100;
+    x = Math.max(0, Math.min(100, x));
+    y = Math.max(0, Math.min(100, y));
+    buttons[i].x = Math.round(x);
+    buttons[i].y = Math.round(y);
+    el.style.left = buttons[i].x + "%";
+    el.style.top = buttons[i].y + "%";
+  }
+  function end(){
+    el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", end);
+    renderList();
+  }
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", end);
+}
+
+function renderList(){
+  const list = document.getElementById("btnList");
+  list.innerHTML = buttons.map((b,i) => `
+    <div class="row">
+      <span>${b.label} → ${b.key}</span>
+      <button onclick="removeBtn(${i})">削除</button>
+    </div>`).join("");
+}
+
+function addBtn(){
+  const label = prompt("ボタンに表示する文字(例: A)");
+  if(!label) return;
+  const key = prompt("送るキー名(例: a / ArrowUp / Enter)", label);
+  if(!key) return;
+  const code = key.length===1 ? "Key"+key.toUpperCase() : key;
+  const keyCode = key.length===1 ? key.toUpperCase().charCodeAt(0) : 0;
+  buttons.push({label, key, code, keyCode, x:50, y:50});
+  renderAll();
+}
+
+function removeBtn(i){
+  buttons.splice(i,1);
+  renderAll();
+}
+
+function buildControlsHTML(){
+  const size = sizePx();
+  const op = opacityVal();
+
+  const btnDivs = buttons.map((b,i) =>
+    `<div class="mc" id="mc-${i}" style="left:${b.x}%;top:${b.y}%">${b.label}</div>`
+  ).join("");
+
+  const keyMap = buttons.map((b,i) =>
+    `${i}:{key:${JSON.stringify(b.key)},code:${JSON.stringify(b.code)},keyCode:${b.keyCode}}`
+  ).join(",\n");
+
+  return `
+<style>
+#mobile-controls{position:fixed;inset:0;z-index:999999;pointer-events:none}
+.mc{position:fixed;width:${size}px;height:${size}px;
+margin:${-size/2}px 0 0 ${-size/2}px;
+border-radius:14px;border:2px solid #fff;
+background:rgba(0,0,0,${op});
+color:#fff;font:bold 22px sans-serif;display:flex;align-items:center;
+justify-content:center;touch-action:none;user-select:none;
+-webkit-user-select:none;pointer-events:auto}
+.mc.edit{border-color:#00E5CC;background:rgba(0,229,204,${op})}
+#mc-edit-toggle{position:fixed;top:10px;right:10px;width:44px;height:44px;
+border-radius:50%;background:rgba(0,0,0,.6);color:#fff;border:2px solid #fff;
+display:flex;align-items:center;justify-content:center;font:20px sans-serif;
+z-index:1000000;pointer-events:auto;touch-action:none;user-select:none}
+</style>
+<div id="mobile-controls">${btnDivs}</div>
+<div id="mc-edit-toggle">⚙</div>
+<script>
+(function(){
+const STORAGE_KEY="mc_layout";
+const keys={${keyMap}};
+let editMode=false;
+
+// 前回保存した配置を復元
+try{
+  const saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||"null");
+  if(saved){
+    document.querySelectorAll(".mc").forEach(b=>{
+      const i=b.id.replace("mc-","");
+      if(saved[i]){ b.style.left=saved[i].x+"%"; b.style.top=saved[i].y+"%"; }
+    });
+  }
+}catch(e){}
+
+function saveLayout(){
+  const data={};
+  document.querySelectorAll(".mc").forEach(b=>{
+    const i=b.id.replace("mc-","");
+    data[i]={x:parseFloat(b.style.left), y:parseFloat(b.style.top)};
+  });
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }catch(e){}
+}
+
+function fire(type,i){
+  const q=keys[i];
+  document.dispatchEvent(new KeyboardEvent(type,{
+    key:q.key,code:q.code,keyCode:q.keyCode,which:q.keyCode,
+    bubbles:true,cancelable:true
+  }));
+}
+
+document.querySelectorAll(".mc").forEach(b=>{
+  const i=b.id.replace("mc-","");
+
+  b.addEventListener("pointerdown", e=>{
+    e.preventDefault();
+    b.setPointerCapture(e.pointerId);
+
+    if(editMode){
+      const move=ev=>{
+        let x=ev.clientX/window.innerWidth*100;
+        let y=ev.clientY/window.innerHeight*100;
+        x=Math.max(0,Math.min(100,x));
+        y=Math.max(0,Math.min(100,y));
+        b.style.left=x+"%"; b.style.top=y+"%";
+      };
+      const up=()=>{
+        b.removeEventListener("pointermove",move);
+        b.removeEventListener("pointerup",up);
+        saveLayout();
+      };
+      b.addEventListener("pointermove",move);
+      b.addEventListener("pointerup",up);
+    }else{
+      fire("keydown", i);
+    }
+  });
+
+  b.addEventListener("pointerup", ()=>{ if(!editMode) fire("keyup", i); });
+  b.addEventListener("pointercancel", ()=>{ if(!editMode) fire("keyup", i); });
+});
+
+const toggle=document.getElementById("mc-edit-toggle");
+toggle.addEventListener("pointerdown", e=>{
+  e.preventDefault();
+  editMode=!editMode;
+  toggle.style.background = editMode ? "rgba(0,229,204,.85)" : "rgba(0,0,0,.6)";
+  document.querySelectorAll(".mc").forEach(b=> b.classList.toggle("edit", editMode));
+});
+})();
+<\/script>`;
+}
+
+// ASCIIパターン(</body> または </BODY> など大文字小文字混在)をバイト列の中から
+// 後ろから探す。ファイル全体を文字列化しないので巨大ファイルでも軽い。
+function findLastAsciiPattern(bytes, pattern){
+  const p = pattern.toLowerCase();
+  outer:
+  for(let i = bytes.length - p.length; i >= 0; i--){
+    for(let j = 0; j < p.length; j++){
+      const c = bytes[i+j];
+      const lower = (c >= 65 && c <= 90) ? c + 32 : c; // A-Z -> a-z
+      if(lower !== p.charCodeAt(j)) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
+
+async function findInsertOffset(file){
+  // </body> はファイルの末尾付近にあるはずなので、まず末尾256KBだけを調べる。
+  // 見つからなければ範囲を広げ、それでも無ければ「見つからなかった」を返す。
+  let tailSize = 256 * 1024;
+  while(tailSize < file.size + 262144){
+    const start = Math.max(0, file.size - tailSize);
+    const buf = new Uint8Array(await file.slice(start, file.size).arrayBuffer());
+    const idx = findLastAsciiPattern(buf, "</body>");
+    if(idx !== -1) return start + idx;
+    if(start === 0) break;
+    tailSize *= 4;
+  }
+  return -1;
+}
+
+async function makeMobile(){
+  const f = document.getElementById("file").files[0];
+  if(!f){ alert("HTMLファイルを選択してください"); return; }
+
+  document.getElementById("status").innerHTML = "<small>処理中…</small>";
+  document.getElementById("save").disabled = true;
+
+  try{
+    const controls = buildControlsHTML();
+    const offset = await findInsertOffset(f);
+
+    const parts = offset >= 0
+      ? [f.slice(0, offset), controls, "\n", f.slice(offset)]
+      : [f, controls]; // </body> が見つからない場合は末尾に追加
+
+    resultBlob = new Blob(parts, {type:"text/html;charset=utf-8"});
+
+    document.getElementById("save").disabled = false;
+    document.getElementById("status").innerHTML =
+      "<small>✅ Mobile HTMLを生成しました！元のゲーム本体はそのままです。</small>";
+  }catch(err){
+    document.getElementById("status").innerHTML =
+      "<small>❌ 生成に失敗しました: " + err.message + "</small>";
+  }
+}
+
+function downloadResult(){
+  if(!resultBlob) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(resultBlob);
+  a.download = "mobile_game.html";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+renderAll();
+</script>
+</body>
+</html>
