@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Mobile HTML Maker</title>
+<style>
+body{font-family:sans-serif;background:#111;color:#fff;margin:0;padding:20px}
+h1{font-size:24px}
+h2{font-size:16px;margin:18px 0 6px}
+button,input{font-size:18px;margin:7px 0;padding:12px;border-radius:10px;border:none}
+button{width:100%;background:#2196F3;color:#fff}
+button:disabled{background:#555;color:#999}
+input[type=file]{background:#222;color:#fff}
+input[type=range]{width:100%;padding:0}
+.box{background:#222;padding:15px;border-radius:14px;margin-top:15px}
+small{color:#bbb}
+label{display:block;font-size:14px;color:#ccc;margin-top:10px}
+
+#editor{position:relative;width:100%;aspect-ratio:9/16;background:#000;
+        border:2px solid #444;border-radius:10px;overflow:hidden;touch-action:none}
+.eb{position:absolute;border-radius:12px;border:2px solid #fff;
+    background:rgba(33,150,243,.55);color:#fff;font:bold 20px sans-serif;
+    display:flex;align-items:center;justify-content:center;
+    user-select:none;touch-action:none}
+
+.row{display:flex;justify-content:space-between;align-items:center;background:#333;
+     padding:8px;border-radius:8px;margin:4px 0}
+.row button{width:auto;padding:6px 10px;margin:0 0 0 4px;background:#444}
+</style>
+</head>
+<body>
+<h1>📱 Mobile HTML Maker</h1>
+
+<div class="box">
+  <p>HTMLゲームをスマホ操作対応HTMLに変換します。大きいファイル(数十MB)でも動きます。</p>
+  <input id="file" type="file" accept=".html,.htm">
+  <button onclick="makeMobile()">🎮 Mobile HTMLを生成</button>
+  <button onclick="downloadResult()" id="save" disabled>💾 生成したHTMLを保存</button>
+  <p id="status"><small>HTMLファイルを選択してください。生成後のゲーム内では⚙で操作設定、▤で操作方式を切り替えられます。</small></p>
+</div>
+
+<div class="box">
+  <h2>見た目の設定</h2>
+  <label>ボタンの大きさ: <span id="sizeVal">50</span></label>
+  <input type="range" id="sizeRange" min="1" max="100" value="50" oninput="onStyleChange()">
+  <label>ボタンの透明度: <span id="opVal">50</span></label>
+  <input type="range" id="opRange" min="1" max="100" value="50" oninput="onStyleChange()">
+</div>
+
+<div class="box">
+  <h2>初期配置(ドラッグで動かせます)</h2>
+  <div id="editor"></div>
+  <button onclick="addBtn()">➕ ボタン追加</button>
+  <div id="btnList"></div>
+</div>
+
+<script>
+let resultBlob = null;
+
+let buttons = [
+  {label:"↑", key:"ArrowUp",    code:"ArrowUp",    keyCode:38, x:15, y:78},
+  {label:"↓", key:"ArrowDown",  code:"ArrowDown",  keyCode:40, x:15, y:92},
+  {label:"←", key:"ArrowLeft",  code:"ArrowLeft",  keyCode:37, x:8,  y:85},
+  {label:"→", key:"ArrowRight", code:"ArrowRight", keyCode:39, x:22, y:85},
+  {label:"Z", key:"z", code:"KeyZ", keyCode:90, x:85, y:80},
+  {label:"X", key:"x", code:"KeyX", keyCode:88, x:78, y:88},
+  {label:"C", key:"c", code:"KeyC", keyCode:67, x:92, y:88}
+];
+
+// 1〜100 の見た目設定を実際の px / 不透明度に変換
+function sizePx(){
+  const v = +document.getElementById("sizeRange").value;
+  return 30 + (v/100)*70; // 30px〜100px
+}
+function opacityVal(){
+  const v = +document.getElementById("opRange").value;
+  return Math.max(0.03, v/100); // 0.03〜1.0
+}
+
+function onStyleChange(){
+  document.getElementById("sizeVal").textContent = document.getElementById("sizeRange").value;
+  document.getElementById("opVal").textContent = document.getElementById("opRange").value;
+  renderEditor();
+}
+
+function renderAll(){
+  renderEditor();
+  renderList();
+}
+
+function renderEditor(){
+  const editor = document.getElementById("editor");
+  editor.innerHTML = "";
+  const size = sizePx();
+  const op = opacityVal();
+  buttons.forEach((b,i) => {
+    const el = document.createElement("div");
+    el.className = "eb";
+    el.textContent = b.label;
+    el.style.width = size + "px";
+    el.style.height = size + "px";
+    el.style.marginLeft = (-size/2) + "px";
+    el.style.marginTop = (-size/2) + "px";
+    el.style.background = `rgba(33,150,243,${op})`;
+    el.style.left = b.x + "%";
+    el.style.top = b.y + "%";
+    el.addEventListener("pointerdown", e => startDrag(e,i,el));
+    editor.appendChild(el);
+  });
+}
+
+function startDrag(e, i, el){
+  e.preventDefault();
+  const editor = document.getElementById("editor");
+  const rect = editor.getBoundingClientRect();
+  el.setPointerCapture(e.pointerId);
+
+  function move(ev){
+    let x = (ev.clientX - rect.left) / rect.width * 100;
+    let y = (ev.clientY - rect.top) / rect.height * 100;
+    x = Math.max(0, Math.min(100, x));
+    y = Math.max(0, Math.min(100, y));
+    buttons[i].x = Math.round(x);
+    buttons[i].y = Math.round(y);
+    el.style.left = buttons[i].x + "%";
+    el.style.top = buttons[i].y + "%";
+  }
+  function end(){
+    el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", end);
+    renderList();
+  }
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", end);
+}
+
+function renderList(){
+  const list = document.getElementById("btnList");
+  list.innerHTML = buttons.map((b,i) => `
+    <div class="row">
+      <span>${b.label} → ${b.key}</span>
+      <button onclick="removeBtn(${i})">削除</button>
+    </div>`).join("");
+}
+
+const SPECIAL = {
+  space:     {key:" ",         code:"Space",        keyCode:32},
+  enter:     {key:"Enter",     code:"Enter",        keyCode:13},
+  escape:    {key:"Escape",    code:"Escape",       keyCode:27},
+  esc:       {key:"Escape",    code:"Escape",       keyCode:27},
+  tab:       {key:"Tab",       code:"Tab",          keyCode:9},
+  backspace: {key:"Backspace", code:"Backspace",    keyCode:8},
+  shift:     {key:"Shift",     code:"ShiftLeft",    keyCode:16},
+  ctrl:      {key:"Control",   code:"ControlLeft",  keyCode:17},
+  alt:       {key:"Alt",       code:"AltLeft",      keyCode:18}
+};
+
+function addBtn(){
+  const label = prompt("ボタンに表示する文字(例: A)");
+  if(!label) return;
+  const name = prompt("送るキー名(例: a / Space / Enter / Shift)", label);
+  if(!name) return;
+
+  const sp = SPECIAL[name.trim().toLowerCase()];
+  let key, code, keyCode;
+  if(sp){
+    ({key, code, keyCode} = sp);
+  }else if(/^[0-9]$/.test(name)){
+    key = name; code = "Digit"+name; keyCode = 48 + +name;
+  }else if(name.length === 1){
+    key = name; code = "Key"+name.toUpperCase(); keyCode = name.toUpperCase().charCodeAt(0);
+  }else{
+    key = name; code = name; keyCode = 0; // ArrowUpなど
+  }
+  buttons.push({label, key, code, keyCode, x:50, y:50});
+  renderAll();
+}
+
+function removeBtn(i){
+  buttons.splice(i,1);
+  renderAll();
+}
+
+function buildControlsHTML(){
+  const size = sizePx();
+  const op = opacityVal();
+
+  const keyMap = buttons.map((b,i) =>
+    `${i}:{key:${JSON.stringify(b.key)},code:${JSON.stringify(b.code)},keyCode:${b.keyCode}}`
+  ).join(",\n");
+
+  const buttonData = buttons.map((b,i) => ({
+    i, label:b.label, x:b.x, y:b.y,
+    arrow:["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(b.key)
+  }));
+
+  return `
+<style>
+#mobile-controls{position:fixed;inset:0;z-index:999999;pointer-events:none}
+.mc{position:fixed;width:${size}px;height:${size}px;
+ margin:${-size/2}px 0 0 ${-size/2}px;border-radius:14px;border:2px solid #fff;
+ background:rgba(0,0,0,${op});color:#fff;font:bold 22px sans-serif;
+ display:flex;align-items:center;justify-content:center;touch-action:none;
+ user-select:none;-webkit-user-select:none;pointer-events:auto}
+.mc.edit{border-color:#00E5CC;background:rgba(0,229,204,${op})}
+.mc.active{background:rgba(255,193,7,.85);border-color:#ffeb3b}
+#mc-mode-toggle,#mc-edit-toggle{position:fixed;top:10px;width:48px;height:48px;
+ border-radius:50%;background:rgba(0,0,0,.72);color:#fff;border:2px solid #fff;
+ display:flex;align-items:center;justify-content:center;font:20px sans-serif;
+ z-index:1000002;pointer-events:auto;touch-action:none;user-select:none}
+#mc-edit-toggle{right:10px}
+#mc-mode-toggle{right:66px;font-size:17px}
+#mc-settings{position:fixed;top:66px;right:10px;z-index:1000003;
+ width:min(280px,calc(100vw - 28px));padding:12px;border-radius:12px;
+ background:rgba(20,20,20,.96);border:1px solid #aaa;color:#fff;
+ font:14px sans-serif;pointer-events:auto;display:none}
+#mc-settings label{display:block;margin:8px 0}
+#mc-settings input{width:100%}
+#mc-settings button{width:100%;padding:9px;margin-top:7px;border:0;border-radius:8px;
+ background:#2196F3;color:#fff;font-size:14px}
+#mc-settings small{color:#ccc}
+#mc-stick{position:fixed;width:130px;height:130px;margin:-65px 0 0 -65px;
+ border:3px solid rgba(255,255,255,.8);border-radius:50%;
+ background:rgba(0,0,0,.18);pointer-events:none;display:none;z-index:999998}
+#mc-stick:after{content:"";position:absolute;left:50%;top:50%;width:9px;height:9px;
+ margin:-4.5px;border-radius:50%;background:#fff}
+#mc-stick-knob{position:absolute;left:50%;top:50%;width:42px;height:42px;
+ margin:-21px;border-radius:50%;background:rgba(255,255,255,.75);
+ border:2px solid #fff}
+#mc-mk-center{position:fixed;width:54px;height:54px;margin:-27px 0 0 -27px;
+ border:3px solid rgba(255,255,255,.9);border-radius:50%;
+ background:rgba(0,0,0,.28);pointer-events:none;display:none;z-index:999998}
+#mc-mk-center:before,#mc-mk-center:after{content:"";position:absolute;
+ left:50%;top:50%;background:#fff;transform:translate(-50%,-50%)}
+#mc-mk-center:before{width:24px;height:3px}
+#mc-mk-center:after{width:3px;height:24px}
+#mc-hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);
+ padding:7px 11px;border-radius:8px;background:rgba(0,0,0,.8);color:#fff;
+ font:13px sans-serif;z-index:1000004;display:none;pointer-events:none}
+</style>
+<div id="mobile-controls"></div>
+<div id="mc-stick"><div id="mc-stick-knob"></div></div>
+<div id="mc-mk-center"></div>
+<div id="mc-mode-toggle">▤</div>
+<div id="mc-edit-toggle">⚙</div>
+<div id="mc-settings">
+ <b>操作設定</b>
+ <label>方向入力が反応する距離: <span id="mc-threshold-value">35</span> px</label>
+ <input id="mc-threshold" type="range" min="8" max="140" value="35">
+ <button id="mc-set-center">MK / Joystick の中心位置を設定</button>
+ <small id="mc-setting-hint">中心位置は画面をタップして指定できます。</small>
+</div>
+<div id="mc-hint"></div>
+<script>
+(function(){
+ const keys={${keyMap}};
+ const buttonData=${JSON.stringify(buttonData)};
+ const root=document.getElementById("mobile-controls");
+ const modeButton=document.getElementById("mc-mode-toggle");
+ const gear=document.getElementById("mc-edit-toggle");
+ const panel=document.getElementById("mc-settings");
+ const thresholdInput=document.getElementById("mc-threshold");
+ const thresholdValue=document.getElementById("mc-threshold-value");
+ const centerMark=document.getElementById("mc-mk-center");
+ const stick=document.getElementById("mc-stick");
+ const knob=document.getElementById("mc-stick-knob");
+ const hint=document.getElementById("mc-hint");
+ const STORE="mc_layout_v2";
+ const CONFIG="mc_control_config_v2";
+ const modes=["Joystick","Button","MK"];
+ let mode="Joystick", editMode=false, settingCenter=false;
+ let config={x:20,y:78,threshold:35};
+ try{const saved=JSON.parse(localStorage.getItem(CONFIG)||"null");if(saved)config={...config,...saved};}catch(e){}
+ try{const saved=JSON.parse(localStorage.getItem(STORE)||"null");if(saved)buttonData.forEach(b=>{if(saved[b.i]){b.x=saved[b.i].x;b.y=saved[b.i].y;}});}catch(e){}
+ thresholdInput.value=config.threshold;
+ thresholdValue.textContent=config.threshold;
+
+ const elements=new Map();
+ buttonData.forEach(b=>{
+   if((mode==="Joystick"||mode==="MK")&&b.arrow)return;
+   const el=document.createElement("div");
+   el.className="mc";el.id="mc-"+b.i;el.textContent=b.label;
+   el.style.left=b.x+"%";el.style.top=b.y+"%";
+   root.appendChild(el);elements.set(b.i,el);
+ });
+ function saveLayout(){
+   const data={};buttonData.forEach(b=>data[b.i]={x:b.x,y:b.y});
+   try{localStorage.setItem(STORE,JSON.stringify(data));}catch(e){}
+ }
+ function saveConfig(){try{localStorage.setItem(CONFIG,JSON.stringify(config));}catch(e){}}
+ function fire(type,i){
+   const q=keys[i];if(!q)return;
+   document.dispatchEvent(new KeyboardEvent(type,{key:q.key,code:q.code,keyCode:q.keyCode,
+     which:q.keyCode,bubbles:true,cancelable:true}));
+ }
+ const pointers=new Map();
+ const keyCounts=new Map();
+ function pressKey(i,pid){
+   if(i==null)return;
+   const old=pointers.get(pid);
+   if(old===i)return;
+   if(old!=null)releaseKey(old,pid);
+   pointers.set(pid,i);
+   const count=keyCounts.get(i)||0;
+   keyCounts.set(i,count+1);
+   if(count===0)fire("keydown",i);
+   const el=elements.get(i);if(el)el.classList.add("active");
+ }
+ function releaseKey(i,pid){
+   if(i==null)return;
+   if(pointers.get(pid)===i)pointers.delete(pid);
+   const count=Math.max(0,(keyCounts.get(i)||1)-1);
+   if(count===0){keyCounts.delete(i);fire("keyup",i);}
+   else keyCounts.set(i,count);
+   const el=elements.get(i);
+   if(el&&count===0)el.classList.remove("active");
+ }
+ function buttonAt(x,y){
+   for(const [i,el] of elements){
+     const r=el.getBoundingClientRect();
+     if(x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom)return i;
+   }
+   return null;
+ }
+ function directionAt(x,y){
+   const cx=innerWidth*config.x/100,cy=innerHeight*config.y/100;
+   const dx=x-cx,dy=y-cy,dist=Math.hypot(dx,dy);
+   if(dist<config.threshold)return null;
+   if(Math.abs(dx)>Math.abs(dy))return dx<0?"ArrowLeft":"ArrowRight";
+   return dy<0?"ArrowUp":"ArrowDown";
+ }
+ function arrowIndex(name){
+   return buttonData.find(b=>b.key===name)?.i ?? null;
+ }
+ function updateDirection(pid,x,y){
+   const i=buttonAt(x,y);
+   if(i!=null){pressKey(i,pid);return;}
+   if(mode==="Button"){
+     const old=pointers.get(pid);
+     if(old!=null)releaseKey(old,pid);
+     pointers.set(pid,null);
+     return;
+   }
+   const dir=directionAt(x,y);
+   const idx=dir?arrowIndex(dir):null;
+   if(idx==null){
+     const old=pointers.get(pid);
+     if(old!=null)releaseKey(old,pid);
+     pointers.set(pid,null);
+   }else{
+     pressKey(idx,pid);
+   }
+   if(mode==="Joystick"){
+     const cx=innerWidth*config.x/100,cy=innerHeight*config.y/100;
+     let dx=x-cx,dy=y-cy,dist=Math.hypot(dx,dy)||1;
+     const limit=42,scale=Math.min(1,limit/dist);
+     knob.style.transform="translate("+dx*scale+"px,"+dy*scale+"px)";
+   }
+ }
+ function updateVisual(){
+   const x=innerWidth*config.x/100,y=innerHeight*config.y/100;
+   centerMark.style.left=config.x+"vw";centerMark.style.top=config.y+"vh";
+   stick.style.left=config.x+"vw";stick.style.top=config.y+"vh";
+   centerMark.style.display=mode==="MK"?"block":"none";
+   stick.style.display=mode==="Joystick"?"block":"none";
+ }
+ function showHint(s){
+   hint.textContent=s;hint.style.display="block";
+   clearTimeout(showHint.timer);showHint.timer=setTimeout(()=>hint.style.display="none",1800);
+ }
+ function applyMode(){
+   modeButton.textContent="▤ "+mode;
+   elements.forEach((el,i)=>{el.style.display=((mode==="Joystick"||mode==="MK")&&buttonData.find(b=>b.i===i)?.arrow)?"none":"flex";});
+   updateVisual();
+   showHint("操作方式: "+mode);
+ }
+ modeButton.addEventListener("pointerdown",e=>{e.preventDefault();mode=modes[(modes.indexOf(mode)+1)%modes.length];applyMode();});
+ gear.addEventListener("pointerdown",e=>{
+   e.preventDefault();panel.style.display=panel.style.display==="block"?"none":"block";
+ });
+ thresholdInput.addEventListener("input",()=>{
+   config.threshold=Number(thresholdInput.value);thresholdValue.textContent=config.threshold;saveConfig();
+ });
+ document.getElementById("mc-set-center").addEventListener("pointerdown",e=>{
+   e.preventDefault();settingCenter=true;
+   panel.style.display="none";
+   showHint("画面上の中心にしたい場所をタップ");
+ });
+ document.addEventListener("pointerdown",e=>{
+   if(e.target.closest("#mc-mode-toggle,#mc-edit-toggle,#mc-settings"))return;
+   if(settingCenter){
+     if(e.target.closest(".mc"))return;
+     config.x=Math.max(2,Math.min(98,e.clientX/innerWidth*100));
+     config.y=Math.max(2,Math.min(98,e.clientY/innerHeight*100));
+     settingCenter=false;saveConfig();updateVisual();showHint("中心位置を保存しました");return;
+   }
+   if(editMode){
+     const el=e.target.closest(".mc");
+     if(!el)return;
+     const i=Number(el.id.replace("mc-",""));
+     const move=ev=>{
+       const b=buttonData.find(v=>v.i===i);if(!b)return;
+       b.x=Math.max(0,Math.min(100,ev.clientX/innerWidth*100));
+       b.y=Math.max(0,Math.min(100,ev.clientY/innerHeight*100));
+       el.style.left=b.x+"%";el.style.top=b.y+"%";
+     };
+     const end=()=>{window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",end);saveLayout();};
+     window.addEventListener("pointermove",move);window.addEventListener("pointerup",end,{once:true});
+     return;
+   }
+   if(e.pointerType==="mouse"&&e.button!==0)return;
+   pointers.set(e.pointerId,null);
+   updateDirection(e.pointerId,e.clientX,e.clientY);
+ },true);
+ document.addEventListener("pointermove",e=>{
+   if(!pointers.has(e.pointerId)||settingCenter||editMode)return;
+   updateDirection(e.pointerId,e.clientX,e.clientY);
+ },true);
+ function endPointer(e){
+   if(!pointers.has(e.pointerId))return;
+   const old=pointers.get(e.pointerId);
+   if(old!=null)releaseKey(old,e.pointerId);
+   pointers.delete(e.pointerId);
+   if(mode==="Joystick")knob.style.transform="translate(0px,0px)";
+ }
+ document.addEventListener("pointerup",endPointer,true);
+ document.addEventListener("pointercancel",endPointer,true);
+ gear.addEventListener("contextmenu",e=>e.preventDefault());
+ // 歯車を長押しではなく、設定パネル内の専用項目から編集モードを切り替える
+ const editButton=document.createElement("button");
+ editButton.textContent="ボタン位置を編集";
+ editButton.addEventListener("pointerdown",e=>{
+   e.preventDefault();editMode=!editMode;
+   document.querySelectorAll(".mc").forEach(el=>el.classList.toggle("edit",editMode));
+   panel.style.display="none";showHint(editMode?"ボタンをドラッグして配置":"配置を保存しました");
+ });
+ panel.appendChild(editButton);
+ applyMode();
+})();
+<\/script>`;
+}
+
+// ASCIIパターン(</body> または </BODY> など大文字小文字混在)をバイト列の中から
+// 後ろから探す。ファイル全体を文字列化しないので巨大ファイルでも軽い。
+function findLastAsciiPattern(bytes, pattern){
+  const p = pattern.toLowerCase();
+  outer:
+  for(let i = bytes.length - p.length; i >= 0; i--){
+    for(let j = 0; j < p.length; j++){
+      const c = bytes[i+j];
+      const lower = (c >= 65 && c <= 90) ? c + 32 : c; // A-Z -> a-z
+      if(lower !== p.charCodeAt(j)) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
+
+async function findInsertOffset(file){
+  // </body> はファイルの末尾付近にあるはずなので、まず末尾256KBだけを調べる。
+  // 見つからなければ範囲を広げ、それでも無ければ「見つからなかった」を返す。
+  let tailSize = 256 * 1024;
+  while(tailSize < file.size + 262144){
+    const start = Math.max(0, file.size - tailSize);
+    const buf = new Uint8Array(await file.slice(start, file.size).arrayBuffer());
+    const idx = findLastAsciiPattern(buf, "</body>");
+    if(idx !== -1) return start + idx;
+    if(start === 0) break;
+    tailSize *= 4;
+  }
+  return -1;
+}
+
+async function makeMobile(){
+  const f = document.getElementById("file").files[0];
+  if(!f){ alert("HTMLファイルを選択してください"); return; }
+
+  document.getElementById("status").innerHTML = "<small>処理中…</small>";
+  document.getElementById("save").disabled = true;
+
+  try{
+    const controls = buildControlsHTML();
+    const offset = await findInsertOffset(f);
+
+    const parts = offset >= 0
+      ? [f.slice(0, offset), controls, "\n", f.slice(offset)]
+      : [f, controls]; // </body> が見つからない場合は末尾に追加
+
+    resultBlob = new Blob(parts, {type:"text/html;charset=utf-8"});
+
+    document.getElementById("save").disabled = false;
+    document.getElementById("status").innerHTML =
+      "<small>✅ Mobile HTMLを生成しました！元のゲーム本体はそのままです。</small>";
+  }catch(err){
+    document.getElementById("status").innerHTML =
+      "<small>❌ 生成に失敗しました: " + err.message + "</small>";
+  }
+}
+
+function downloadResult(){
+  if(!resultBlob) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(resultBlob);
+  a.download = "mobile_game.html";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+renderAll();
+</script>
+</body>
+</html>
